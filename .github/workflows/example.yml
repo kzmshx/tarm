@@ -1,0 +1,34 @@
+name: Example
+
+on:
+  pull_request:
+
+jobs:
+  analyze-terraform:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # Example of using the action from an external repository
+      - name: Analyze Terraform Changes
+        id: tarm
+        uses: kzmshx/tarm@main
+        with:
+          root: ./infrastructure
+          entrypoints: |
+            infrastructure/environments/*/*
+            infrastructure/stages/*/*
+          comment-pr: true
+
+      # Use the outputs
+      - name: Show affected modules
+        if: steps.tarm.outputs.affected-count > 0
+        run: |
+          echo "Affected modules: ${{ steps.tarm.outputs.affected-modules }}"
+          echo "Total count: ${{ steps.tarm.outputs.affected-count }}"

@@ -1,0 +1,124 @@
+name: 'Terraform Affected Root Modules'
+description: 'Analyze Terraform module dependencies and find affected root modules'
+author: 'kzmshx'
+
+inputs:
+  root:
+    description: 'Root directory to search for Terraform files'
+    required: false
+    default: '.'
+  entrypoints:
+    description: 'Glob patterns for root modules (newline separated)'
+    required: true
+  paths:
+    description: 'Paths to analyze (newline separated). If not specified, changed files in PR will be used'
+    required: false
+  changed-files:
+    description: 'Automatically detect changed files from PR'
+    required: false
+    default: 'true'
+  exclude:
+    description: 'Glob patterns to exclude'
+    required: false
+    default: '.terraform/** **/.terragrunt-cache/**'
+  base-ref:
+    description: 'Base reference for change detection'
+    required: false
+    default: 'origin/${{ github.base_ref }}'
+  output-format:
+    description: 'Output format (github or json)'
+    required: false
+    default: 'github'
+  comment-pr:
+    description: 'Comment on PR with affected modules'
+    required: false
+    default: 'true'
+  go-version:
+    description: 'Go version to use'
+    required: false
+    default: '1.21'
+
+outputs:
+  affected-modules:
+    description: 'Space-separated list of affected root modules'
+    value: ${{ steps.analyze.outputs.affected-modules }}
+  affected-modules-json:
+    description: 'JSON array of affected modules with details'
+    value: ${{ steps.analyze.outputs.affected-modules-json }}
+  affected-count:
+    description: 'Number of affected root modules'
+    value: ${{ steps.analyze.outputs.affected-count }}
+  matrix:
+    description: 'GitHub Actions matrix strategy JSON'
+    value: ${{ steps.analyze.outputs.matrix }}
+  markdown-summary:
+    description: 'Markdown summary for PR comment'
+    value: ${{ steps.analyze.outputs.markdown-summary }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Setup Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: ${{ inputs.go-version }}
+
+    - name: Run tarm
+      id: analyze
+      shell: bash
+      run: |
+        cd "${{ github.action_path }}"
+        go run cmd/tarm-action/main.go
+      env:
+        INPUT_ROOT: ${{ inputs.root }}
+        INPUT_ENTRYPOINTS: ${{ inputs.entrypoints }}
+        INPUT_PATHS: ${{ inputs.paths }}
+        INPUT_CHANGED_FILES: ${{ inputs.changed-files }}
+        INPUT_BASE_REF: ${{ inputs.base-ref }}
+        INPUT_OUTPUT_FORMAT: ${{ inputs.output-format }}
+        GITHUB_OUTPUT: ${{ runner.temp }}/tarm-output
+
+    - name: Load outputs
+      id: load-outputs
+      shell: bash
+      run: |
+        if [ -f "${{ runner.temp }}/tarm-output" ]; then
+          cat "${{ runner.temp }}/tarm-output" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Comment PR
+      if: ${{ inputs.comment-pr == 'true' && steps.load-outputs.outputs.affected-count > 0 && github.event_name == 'pull_request' }}
+      uses: actions/github-script@v7
+      with:
+        script: |
+          // Delete existing comments
+          const { data: comments } = await github.rest.issues.listComments({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            issue_number: context.issue.number,
+          });
+          
+          const existingComments = comments.filter(c => 
+            c.user.type === 'Bot' && c.body.includes('## Terraform Affected Root Modules')
+          );
+          
+          for (const comment of existingComments) {
+            await github.rest.issues.deleteComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              comment_id: comment.id,
+            });
+          }
+          
+          // Create new comment
+          const markdown = `${{ steps.load-outputs.outputs.markdown-summary }}`;
+          const body = markdown.replace(/%0A/g, '\n');
+          
+          if (body && body.trim() !== '') {
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: body
+            });
+          }
