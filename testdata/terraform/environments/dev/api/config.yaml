@@ -1,0 +1,8 @@
+database:
+  host: dev-db.example.com
+  port: 5432
+  name: dev_api_db
+
+logging:
+  level: debug
+  format: json

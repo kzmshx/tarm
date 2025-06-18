@@ -1,0 +1,12 @@
+{
+  "tables": [
+    {
+      "name": "users",
+      "columns": [
+        {"name": "id", "type": "serial", "primary_key": true},
+        {"name": "email", "type": "varchar(255)", "unique": true},
+        {"name": "created_at", "type": "timestamp", "default": "now()"}
+      ]
+    }
+  ]
+}
