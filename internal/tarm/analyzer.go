@@ -1,4 +1,4 @@
-package analyzer
+package tarm
 
 import (
 	"fmt"
@@ -7,48 +7,44 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/bmatcuk/doublestar/v4"
 	"github.com/hashicorp/terraform-config-inspect/tfconfig"
-	"github.com/kzmshx/tarm/internal/graph"
-	"github.com/kzmshx/tarm/internal/resolver"
 )
 
-// Analyzer analyzes Terraform module dependencies
+// Analyzer analyzes Terraform module dependencies.
 type Analyzer struct {
-	root  string
-	graph *graph.DependencyGraph
+	root     string
+	graph    *DependencyGraph
+	warnings []string
 }
 
-// New creates a new analyzer
-func New(root string) *Analyzer {
-	// Convert to absolute path
+// NewAnalyzer creates a new analyzer for the given root directory.
+func NewAnalyzer(root string) *Analyzer {
 	absRoot, err := filepath.Abs(root)
 	if err != nil {
 		absRoot = root
 	}
 	return &Analyzer{
 		root:  absRoot,
-		graph: graph.NewDependencyGraph(),
+		graph: NewDependencyGraph(),
 	}
 }
 
-// Analyze analyzes all Terraform files in the root directory and builds a dependency graph
+// Analyze walks the root directory and builds a dependency graph.
 func (a *Analyzer) Analyze() error {
 	return filepath.WalkDir(a.root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
 
-		// Skip .terraform directories
 		if d.IsDir() && (d.Name() == ".terraform" || strings.Contains(path, ".terragrunt-cache")) {
 			return filepath.SkipDir
 		}
 
-		// Only process directories
 		if !d.IsDir() {
 			return nil
 		}
 
-		// Check if directory contains .tf files
 		hasTfFiles, err := containsTerraformFiles(path)
 		if err != nil {
 			return err
@@ -57,48 +53,41 @@ func (a *Analyzer) Analyze() error {
 			return nil
 		}
 
-		// Parse the module
-		module, diags := tfconfig.LoadModule(path)
-		if diags.HasErrors() {
-			// Log error but continue
-			fmt.Fprintf(os.Stderr, "ERROR: Failed to parse %s: %s\n", path, diags.Error())
-			return nil
-		}
-
-		// Get relative path from root
 		relPath, err := filepath.Rel(a.root, path)
 		if err != nil {
 			return err
 		}
 
-		// Process module calls
+		module, diags := tfconfig.LoadModule(path)
+		if diags.HasErrors() {
+			msg := fmt.Sprintf("failed to parse %s: %s", relPath, diags.Error())
+			fmt.Fprintf(os.Stderr, "WARN: %s\n", msg)
+			a.warnings = append(a.warnings, msg)
+			return nil
+		}
+
 		for _, call := range module.ModuleCalls {
-			// Resolve the source path
-			resolvedPath, err := resolver.ResolveModuleSource(path, call.Source)
+			resolvedPath, err := ResolveModuleSource(path, call.Source)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "WARN: Failed to resolve module source %q in %s: %v\n", call.Source, relPath, err)
 				continue
 			}
 
-			// Skip non-local modules
 			if resolvedPath == "" {
 				continue
 			}
 
-			// Make it relative to root
 			relResolvedPath, err := filepath.Rel(a.root, resolvedPath)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "WARN: Failed to get relative path for %s: %v\n", resolvedPath, err)
 				continue
 			}
 
-			// Check if the resolved path exists
 			if _, err := os.Stat(resolvedPath); os.IsNotExist(err) {
 				fmt.Fprintf(os.Stderr, "WARN: Module source %q not found in module %q\n", call.Source, relPath)
 				continue
 			}
 
-			// Add dependency
 			a.graph.AddDependency(relPath, relResolvedPath)
 		}
 
@@ -106,41 +95,44 @@ func (a *Analyzer) Analyze() error {
 	})
 }
 
-// GetAffectedRootModules returns root modules affected by changes in the given paths
+// GetAffectedRootModules returns root modules affected by changes in the given paths,
+// using glob patterns to identify root modules.
 func (a *Analyzer) GetAffectedRootModules(changedPaths []string, rootModulePatterns []string) (map[string][]string, error) {
+	return a.GetAffectedRootModulesFunc(changedPaths, func(path string) bool {
+		return isRootModule(path, rootModulePatterns)
+	})
+}
+
+// GetAffectedRootModulesFunc returns root modules affected by changes in the given paths,
+// using a custom matcher function to identify root modules.
+func (a *Analyzer) GetAffectedRootModulesFunc(changedPaths []string, isRoot func(string) bool) (map[string][]string, error) {
 	affectedByPath := make(map[string][]string)
 
 	for _, changePath := range changedPaths {
-		// Convert to absolute path if needed
 		if !filepath.IsAbs(changePath) {
 			changePath = filepath.Join(a.root, changePath)
 		}
 
-		// Find parent directory with .tf files
-		tfDir, err := resolver.FindParentWithTerraformFiles(changePath, a.root)
+		tfDir, err := FindParentWithTerraformFiles(changePath, a.root)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "WARN: Failed to find parent with .tf files for %s: %v\n", changePath, err)
 			continue
 		}
 
 		if tfDir == "" {
-			// No parent with .tf files found
 			continue
 		}
 
-		// Get relative path
 		relTfDir, err := filepath.Rel(a.root, tfDir)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "WARN: Failed to get relative path for %s: %v\n", tfDir, err)
 			continue
 		}
 
-		// Get all affected modules
 		affected := a.graph.GetAffectedModules(relTfDir)
 
-		// Filter to only root modules
 		for _, module := range affected {
-			if isRootModule(module, rootModulePatterns) {
+			if isRoot(module) {
 				if _, exists := affectedByPath[module]; !exists {
 					affectedByPath[module] = []string{}
 				}
@@ -152,12 +144,16 @@ func (a *Analyzer) GetAffectedRootModules(changedPaths []string, rootModulePatte
 	return affectedByPath, nil
 }
 
-// GetDependencyGraph returns the dependency graph
-func (a *Analyzer) GetDependencyGraph() *graph.DependencyGraph {
+// GetDependencyGraph returns the dependency graph.
+func (a *Analyzer) GetDependencyGraph() *DependencyGraph {
 	return a.graph
 }
 
-// containsTerraformFiles checks if a directory contains .tf files
+// Warnings returns warnings collected during analysis.
+func (a *Analyzer) Warnings() []string {
+	return a.warnings
+}
+
 func containsTerraformFiles(dir string) (bool, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -173,12 +169,10 @@ func containsTerraformFiles(dir string) (bool, error) {
 	return false, nil
 }
 
-// isRootModule checks if a module path matches any of the root module patterns
 func isRootModule(modulePath string, patterns []string) bool {
 	for _, pattern := range patterns {
-		matched, err := filepath.Match(pattern, modulePath)
+		matched, err := doublestar.Match(pattern, modulePath)
 		if err != nil {
-			// Invalid pattern, skip
 			continue
 		}
 		if matched {

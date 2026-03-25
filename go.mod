@@ -2,7 +2,10 @@ module github.com/kzmshx/tarm
 
 go 1.24.4
 
-require github.com/hashicorp/terraform-config-inspect v0.0.0-20250515145901-f4c50e64fd6d
+require (
+	github.com/bmatcuk/doublestar/v4 v4.10.0
+	github.com/hashicorp/terraform-config-inspect v0.0.0-20250515145901-f4c50e64fd6d
+)
 
 require (
 	github.com/agext/levenshtein v1.2.2 // indirect

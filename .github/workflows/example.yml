@@ -15,20 +15,17 @@ jobs:
         with:
           fetch-depth: 0
 
-      # Example of using the action from an external repository
       - name: Analyze Terraform Changes
         id: tarm
-        uses: kzmshx/tarm@main
+        uses: ./
         with:
-          root: ./infrastructure
-          entrypoints: |
-            infrastructure/environments/*/*
-            infrastructure/stages/*/*
+          root: ./testdata/terraform
+          root-module-patterns: |
+            environments/*/*
           comment-pr: true
 
-      # Use the outputs
       - name: Show affected modules
-        if: steps.tarm.outputs.affected-count > 0
+        if: steps.tarm.outputs.has-affected-modules == 'true'
         run: |
           echo "Affected modules: ${{ steps.tarm.outputs.affected-modules }}"
           echo "Total count: ${{ steps.tarm.outputs.affected-count }}"

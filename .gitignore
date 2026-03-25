@@ -1,0 +1,7 @@
+.claude/agents/local/
+.claude/hooks/local/
+.claude/local/
+.claude/rules/local/
+.claude/skills/_*/
+.claude/worktrees/
+CLAUDE.local.md
