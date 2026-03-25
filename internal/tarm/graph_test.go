@@ -158,6 +158,11 @@ func TestDetectCircularDependencies(t *testing.T) {
 		{name: "indirect cycle", edges: [][2]string{{"a", "b"}, {"b", "c"}, {"c", "a"}}, wantCycles: true},
 		{name: "self-loop", edges: [][2]string{{"a", "a"}}, wantCycles: true},
 		{name: "empty graph", edges: nil, wantCycles: false},
+		{
+			name:       "cycle in dependents-only module",
+			edges:      [][2]string{{"a", "b"}, {"b", "c"}, {"c", "b"}},
+			wantCycles: true,
+		},
 	}
 
 	for _, tt := range tests {

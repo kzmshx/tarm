@@ -3,6 +3,7 @@ package tarm
 import (
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 
 	"github.com/kzmshx/tarm/internal/git"
@@ -39,6 +40,7 @@ type Config struct {
 type Result struct {
 	AffectedModules []AffectedRootModule
 	Cycles          [][]string
+	Warnings        []string
 }
 
 // Run executes the analysis with the given config and change provider.
@@ -53,14 +55,21 @@ func Run(cfg Config, changeProvider git.ChangedFilesProvider) (*Result, error) {
 		return nil, fmt.Errorf("at least one root module pattern must be specified")
 	}
 
-	// Resolve effective root module patterns
+	// Resolve effective root module set.
+	// When ExcludeModulePatterns is specified, we resolve patterns against the
+	// filesystem to get a concrete set of root module paths, then use set lookup
+	// instead of pattern matching for root module detection.
+	var rootModuleSet map[string]bool
 	rootModulePatterns := cfg.RootModulePatterns
 	if len(cfg.ExcludeModulePatterns) > 0 {
 		filtered, err := FilterPatterns(os.DirFS(root), rootModulePatterns, cfg.ExcludeModulePatterns)
 		if err != nil {
 			return nil, fmt.Errorf("failed to filter root module patterns: %w", err)
 		}
-		rootModulePatterns = filtered
+		rootModuleSet = make(map[string]bool, len(filtered))
+		for _, p := range filtered {
+			rootModuleSet[p] = true
+		}
 	}
 
 	// Collect changed files
@@ -90,8 +99,16 @@ func Run(cfg Config, changeProvider git.ChangedFilesProvider) (*Result, error) {
 		fmt.Fprintf(os.Stderr, "WARN: Circular dependency detected: %s\n", strings.Join(cycle, " -> "))
 	}
 
+	// Build root module matcher
+	var matchRootModule func(string) bool
+	if rootModuleSet != nil {
+		matchRootModule = func(path string) bool { return rootModuleSet[path] }
+	} else {
+		matchRootModule = func(path string) bool { return isRootModule(path, rootModulePatterns) }
+	}
+
 	// Get affected root modules
-	affectedMap, err := a.GetAffectedRootModules(changedFiles, rootModulePatterns)
+	affectedMap, err := a.GetAffectedRootModulesFunc(changedFiles, matchRootModule)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get affected modules: %w", err)
 	}
@@ -105,8 +122,13 @@ func Run(cfg Config, changeProvider git.ChangedFilesProvider) (*Result, error) {
 		})
 	}
 
+	sort.Slice(modules, func(i, j int) bool {
+		return modules[i].Path < modules[j].Path
+	})
+
 	return &Result{
 		AffectedModules: modules,
 		Cycles:          cycles,
+		Warnings:        a.Warnings(),
 	}, nil
 }

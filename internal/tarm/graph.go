@@ -118,6 +118,11 @@ func (g *DependencyGraph) DetectCircularDependencies() [][]string {
 			dfs(module)
 		}
 	}
+	for module := range g.Dependents {
+		if visited[module] == 0 {
+			dfs(module)
+		}
+	}
 
 	return cycles
 }

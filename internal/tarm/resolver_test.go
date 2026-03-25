@@ -69,9 +69,10 @@ func TestFindParentWithTerraformFiles(t *testing.T) {
 	testRoot, _ := filepath.Abs(filepath.Join("..", "..", "testdata", "terraform"))
 
 	tests := []struct {
-		name    string
-		start   string
-		wantDir string
+		name      string
+		start     string
+		wantDir   string
+		wantEmpty bool
 	}{
 		{name: "file in directory with .tf files", start: filepath.Join(testRoot, "environments", "dev", "api", "main.tf"), wantDir: filepath.Join(testRoot, "environments", "dev", "api")},
 		{name: "directory with .tf files", start: filepath.Join(testRoot, "environments", "dev", "api"), wantDir: filepath.Join(testRoot, "environments", "dev", "api")},
@@ -86,6 +87,12 @@ func TestFindParentWithTerraformFiles(t *testing.T) {
 			got, err := FindParentWithTerraformFiles(tt.start, testRoot)
 			if err != nil {
 				t.Fatalf("error = %v", err)
+			}
+			if tt.wantEmpty {
+				if got != "" {
+					t.Errorf("got %q, want empty", got)
+				}
+				return
 			}
 			if got != tt.wantDir {
 				t.Errorf("got %q, want %q", got, tt.wantDir)

@@ -13,8 +13,9 @@ import (
 
 // Analyzer analyzes Terraform module dependencies.
 type Analyzer struct {
-	root  string
-	graph *DependencyGraph
+	root     string
+	graph    *DependencyGraph
+	warnings []string
 }
 
 // NewAnalyzer creates a new analyzer for the given root directory.
@@ -52,15 +53,17 @@ func (a *Analyzer) Analyze() error {
 			return nil
 		}
 
-		module, diags := tfconfig.LoadModule(path)
-		if diags.HasErrors() {
-			fmt.Fprintf(os.Stderr, "ERROR: Failed to parse %s: %s\n", path, diags.Error())
-			return nil
-		}
-
 		relPath, err := filepath.Rel(a.root, path)
 		if err != nil {
 			return err
+		}
+
+		module, diags := tfconfig.LoadModule(path)
+		if diags.HasErrors() {
+			msg := fmt.Sprintf("failed to parse %s: %s", relPath, diags.Error())
+			fmt.Fprintf(os.Stderr, "WARN: %s\n", msg)
+			a.warnings = append(a.warnings, msg)
+			return nil
 		}
 
 		for _, call := range module.ModuleCalls {
@@ -92,8 +95,17 @@ func (a *Analyzer) Analyze() error {
 	})
 }
 
-// GetAffectedRootModules returns root modules affected by changes in the given paths.
+// GetAffectedRootModules returns root modules affected by changes in the given paths,
+// using glob patterns to identify root modules.
 func (a *Analyzer) GetAffectedRootModules(changedPaths []string, rootModulePatterns []string) (map[string][]string, error) {
+	return a.GetAffectedRootModulesFunc(changedPaths, func(path string) bool {
+		return isRootModule(path, rootModulePatterns)
+	})
+}
+
+// GetAffectedRootModulesFunc returns root modules affected by changes in the given paths,
+// using a custom matcher function to identify root modules.
+func (a *Analyzer) GetAffectedRootModulesFunc(changedPaths []string, isRoot func(string) bool) (map[string][]string, error) {
 	affectedByPath := make(map[string][]string)
 
 	for _, changePath := range changedPaths {
@@ -120,7 +132,7 @@ func (a *Analyzer) GetAffectedRootModules(changedPaths []string, rootModulePatte
 		affected := a.graph.GetAffectedModules(relTfDir)
 
 		for _, module := range affected {
-			if isRootModule(module, rootModulePatterns) {
+			if isRoot(module) {
 				if _, exists := affectedByPath[module]; !exists {
 					affectedByPath[module] = []string{}
 				}
@@ -135,6 +147,11 @@ func (a *Analyzer) GetAffectedRootModules(changedPaths []string, rootModulePatte
 // GetDependencyGraph returns the dependency graph.
 func (a *Analyzer) GetDependencyGraph() *DependencyGraph {
 	return a.graph
+}
+
+// Warnings returns warnings collected during analysis.
+func (a *Analyzer) Warnings() []string {
+	return a.warnings
 }
 
 func containsTerraformFiles(dir string) (bool, error) {

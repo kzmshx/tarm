@@ -91,3 +91,40 @@ func TestRun(t *testing.T) {
 		})
 	}
 }
+
+func TestRun_ResultIsSorted(t *testing.T) {
+	testRoot := filepath.Join("..", "..", "testdata", "terraform")
+	cfg := Config{
+		Root:               testRoot,
+		RootModulePatterns: []string{"environments/*/*"},
+		ChangedFiles:       []string{"modules/network/main.tf"},
+	}
+	result, err := Run(cfg, nil)
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+
+	for i := 1; i < len(result.AffectedModules); i++ {
+		if result.AffectedModules[i].Path < result.AffectedModules[i-1].Path {
+			t.Errorf("result is not sorted: %s comes after %s",
+				result.AffectedModules[i].Path, result.AffectedModules[i-1].Path)
+		}
+	}
+}
+
+func TestRun_WarningsOnParseErrors(t *testing.T) {
+	testRoot := filepath.Join("..", "..", "testdata", "terraform-errors", "invalid-syntax")
+	cfg := Config{
+		Root:               testRoot,
+		RootModulePatterns: []string{"*"},
+		ChangedFiles:       []string{"main.tf"},
+	}
+	result, err := Run(cfg, nil)
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+
+	if len(result.Warnings) == 0 {
+		t.Error("expected warnings for parse errors, got none")
+	}
+}

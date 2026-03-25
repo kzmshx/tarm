@@ -20,12 +20,8 @@ type DiffProvider struct {
 
 // ChangedFiles returns the list of files changed between BaseRef and HeadRef.
 func (p *DiffProvider) ChangedFiles() ([]string, error) {
-	var cmd *exec.Cmd
-	if p.HeadRef == "" || p.HeadRef == "HEAD" {
-		cmd = exec.Command("git", "diff", "--name-only", p.BaseRef, "HEAD")
-	} else {
-		cmd = exec.Command("git", "diff", "--name-only", fmt.Sprintf("origin/%s...origin/%s", p.BaseRef, p.HeadRef))
-	}
+	args := buildDiffArgs(p.BaseRef, p.HeadRef)
+	cmd := exec.Command("git", args...)
 
 	output, err := cmd.Output()
 	if err != nil {
@@ -33,6 +29,14 @@ func (p *DiffProvider) ChangedFiles() ([]string, error) {
 	}
 
 	return parseLines(string(output)), nil
+}
+
+// buildDiffArgs constructs git diff arguments from base and head refs.
+func buildDiffArgs(baseRef, headRef string) []string {
+	if headRef == "" || headRef == "HEAD" {
+		return []string{"diff", "--name-only", baseRef, "HEAD"}
+	}
+	return []string{"diff", "--name-only", fmt.Sprintf("%s...%s", baseRef, headRef)}
 }
 
 // StaticProvider returns a fixed list of changed files.

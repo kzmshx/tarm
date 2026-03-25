@@ -98,7 +98,7 @@ func FindParentWithTerraformFiles(startPath, rootDir string) (string, error) {
 			}
 		}
 
-		if current == rootDir || !strings.HasPrefix(current, rootDir) {
+		if current == rootDir || !IsWithinDirectory(current, rootDir) {
 			break
 		}
 
