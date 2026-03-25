@@ -23,11 +23,11 @@ inputs:
   base-ref:
     description: 'Base ref for change detection'
     required: false
-    default: '${{ github.base_ref }}'
+    default: 'origin/${{ github.base_ref }}'
   head-ref:
     description: 'Head ref for change detection'
     required: false
-    default: '${{ github.head_ref }}'
+    default: 'origin/${{ github.head_ref }}'
   output-format:
     description: 'Output format (github or json)'
     required: false
