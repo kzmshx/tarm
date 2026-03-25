@@ -15,18 +15,15 @@ jobs:
         with:
           fetch-depth: 0
 
-      # Example of using the action from an external repository
       - name: Analyze Terraform Changes
         id: tarm
         uses: ./
         with:
-          root: ./infrastructure
+          root: ./testdata/terraform
           root-module-patterns: |
-            infrastructure/environments/*/*
-            infrastructure/stages/*/*
+            environments/*/*
           comment-pr: true
 
-      # Use the outputs
       - name: Show affected modules
         if: steps.tarm.outputs.has-affected-modules == 'true'
         run: |
